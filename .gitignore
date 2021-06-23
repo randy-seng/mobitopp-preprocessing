@@ -141,3 +141,6 @@ workspace.code-workspace
 
 # Windows
 Thumbs.db
+
+# mobitopp preprocessing
+data/
