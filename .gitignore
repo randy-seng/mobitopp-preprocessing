@@ -131,6 +131,7 @@ dmypy.json
 # Editors
 .vscode/
 .idea/
+workspace.code-workspace
 
 # Vagrant
 .vagrant/
@@ -140,3 +141,6 @@ dmypy.json
 
 # Windows
 Thumbs.db
+
+# mobitopp preprocessing
+data/
