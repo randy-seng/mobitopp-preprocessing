@@ -131,6 +131,7 @@ dmypy.json
 # Editors
 .vscode/
 .idea/
+workspace.code-workspace
 
 # Vagrant
 .vagrant/
