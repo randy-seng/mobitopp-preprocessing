@@ -1,11 +1,20 @@
 import json
 from mpipe import UnorderedWorker, UnorderedStage, Pipeline
 from esy.osmfilter import run_filter
+from esy.osmfilter.osm_filter import create_single_element
 from esy.osmfilter import Node, Way, Relation
 
 
-class PbfPoiFilter(UnorderedWorker):
-    def __init__(self):
+from mobitopp_preprocessing.helpers.file_helper import (
+    file_exists,
+    read_json_file,
+    save_as_json_file,
+)
+
+
+class Filter(metaclass=ABCMeta):
+    @abstractmethod
+    def execute(self, task):
         pass
 
     def doTask(
@@ -65,33 +74,37 @@ class PbfPoiFilter(UnorderedWorker):
         return data
 
 
-class DataCleanser(UnorderedWorker):
-    def doTask(self, task):
-        # TODO implement
+class NotJsonFileError(Exception):
         pass
 
 
-class PreprocessingPipeline:
-    _first_stage = None
-    _last_stage = None
-    _pipeline = None
+class NoStageDefinedError(Exception):
+    """Raised when no stage has been defined for the pipeline."""
 
-    def __init__(self):
         pass
 
-    def linkStage(self, stage):
-        if self._first_stage is None:
-            self._first_stage, self._last_stage = stage, stage
-        else:
-            self._last_stage.link(stage)
-            self._last_stage = stage
-        self._pipeline = None
+
+class Pipeline:
+    def __init__(self, stages=[]):
+        self._stages = stages
+
+    def add(self, stage):
+        self.stages.append(stage)
 
     def run(self, task):
-        # TODO: Does it still work when the first stage needs more than
-        # 1 parameter
-        if self._pipeline is None:
-            self._pipeline = Pipeline(self._first_stage)
+        if len(self._stages) == 0:
+            raise NoStageDefinedError("No stage has been defined on this pipeline!")
+
+        return self._execute(task=task, filters=self._stages)
+
+    def _execute(self, task, filters):
+        filter, *tail = filters
+        result = filter.execute(task)
+
+        if len(tail) != 0:
+            return self._execute(result, tail)
+        else:
+            return result
 
         self._pipeline.put(task)
 
