@@ -1,0 +1,12 @@
+{
+    "whitefilter": {
+        "amenity": [
+            "charging_station"
+        ]
+    },
+    "blackfilter": {
+        "bicycle": [
+            "yes"
+        ]
+    }
+}

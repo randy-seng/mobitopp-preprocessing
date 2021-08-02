@@ -1,0 +1,8 @@
+{
+    "whitefilter": {
+        "amenity": [
+            "cinema",
+            "planetarium"
+        ]
+    }
+}
