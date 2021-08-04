@@ -38,7 +38,7 @@ class Filter(metaclass=ABCMeta):
         pass
 
 
-class PbfFilter(Filter):
+class PbfPoiFilter(Filter):
     """Reads from a osm pbf file and filters out POIs using a tag list.
 
     This class should be used in conjunction with the createStage function,
@@ -54,21 +54,23 @@ class PbfFilter(Filter):
 
     def __init__(
         self,
-        output_dir,
-        output_file_name,
+        out_dir,
+        out_file_name,
         prefilter_tags_path,
         whitefilter_tags_path=None,  # TODO: Change to None
         blackfilter_tags_path=None,  # TODO: Change to None
     ):
         # TODO: setup
+        createDir(out_dir)
+
         self._prefilter_tags_path = prefilter_tags_path
-        self._output_dir = output_dir
-        self._output_file_name = output_file_name
+        self._out_dir = out_dir
+        self._out_file_name = out_file_name
         self._whitefilter_tags_path = whitefilter_tags_path
         self._blackfilter_tags_path = blackfilter_tags_path
 
     def execute(self, input_pbf_filepath):
-        json_filepath = os.path.join(self._output_dir, self._output_file_name + ".json")
+        json_filepath = os.path.join(self._out_dir, self._out_file_name + ".json")
         prefilter, blackfilter, whitefilter = self._create_esm_filters()
         poi_data = self._filter_data(
             pbf_filepath=input_pbf_filepath,
@@ -109,9 +111,7 @@ class PbfFilter(Filter):
     ):
 
         [data, elements] = run_filter(
-            elementname=self._output_file_name.join(
-                "_poi"
-            ),  # TODO: give identifiable name
+            elementname=self.out_file_name.join("_poi"),  # TODO: give identifiable name
             PBF_inputfile=pbf_filepath,
             JSON_outputfile=json_filepath,
             prefilter=prefilter,
@@ -128,24 +128,28 @@ class PbfFilter(Filter):
 class CalculateAttractivity(Filter):
     def __init__(
         self,
-        poi_processing_info_csv,
-        output_dir,
-        output_file_name,
+        poi_attractivity_info_path,
+        out_dir,
+        out_file_name,
         pbf_path,
         poi_filter_tags_path,
         poi_path=None,
         use_cached_data=False,
         epsg=3035,
     ):
+        createDir(out_dir)
+
         self._poi_path = poi_path
-        self._poi_processing_info = poi_processing_info_csv
-        self._output_dir = output_dir
-        self._output_file_name = output_file_name
+        self._poi_attractivity_info_path = poi_attractivity_info_path
+        self._out_dir = out_dir
+        self._out_file_name = out_file_name
         self._poi_filter_tags = poi_filter_tags_path
         self._use_cached_data = use_cached_data
         self._epsg = epsg
-        self._building_data = self.load_building_data(pbf_path)
-        self._poi_data = self.load_poi_data(pbf_path, poi_filter_tags_path)
+        self._building_data = self.load_building_data(pbf_path, use_cached_data)
+        self._poi_data = self.load_poi_data(
+            pbf_path, poi_filter_tags_path, use_cached_data
+        )
 
     def execute(self, poi=None):
         poi_list = []
@@ -153,28 +157,28 @@ class CalculateAttractivity(Filter):
         if poi is None:
             poi = read_json_file(self._poi_path)
 
-        processing_info = pd.read_csv(self._poi_processing_info)
+        attractivity_info = pd.read_csv(self._poi_attractivity_info)
 
-        for row in processing_info.itertuples():
+        for row in attractivity_info.itertuples():
             result = self._process(attractivity_info=row, prefiltered_data=poi)
             poi_list.append(result)
 
         save_as_json_file(
-            self._output_dir,
-            self._output_file_name + "_with_attractivity.json",
+            self._out_dir,
+            self._out_file_name + "_with_attractivity.json",
             poi_list,
         )
         print("finished")
 
-    def load_building_data(self, pbf_path):
-        buildings_path = os.path.join(self._output_dir, "buildings.geojson")
+    def load_building_data(self, pbf_path, use_cache=False):
+        buildings_path = os.path.join(self._out_dir, "buildings.geojson")
         selected_col = ["id", "geometry"]
 
-        if self._use_cached_data and file_exists(buildings_path):
+        if use_cache and file_exists(buildings_path):
             buildings = gpd.read_file(buildings_path)
             buildings.set_crs(epsg=self._epsg, inplace=True)
             buildings.set_index("id", inplace=True)
-            return gpd.read_file(buildings_path)
+            return buildings
         else:
             # load osm building data from scratch
             osm = OSM(pbf_path)
@@ -185,11 +189,11 @@ class CalculateAttractivity(Filter):
             buildings.to_file(buildings_path, driver="GeoJSON")
             return buildings
 
-    def load_poi_data(self, pbf_path, tag_list_path):
-        pois_path = os.path.join(self._output_dir, "pois.csv")
+    def load_poi_data(self, pbf_path, taglist_path, use_cache=False):
+        pois_path = os.path.join(self._out_dir, "pois.geojson")
         selected_col = ["id", "geometry"]
 
-        if self._use_cached_data and file_exists(pois_path):
+        if use_cache and file_exists(pois_path):
             df = pd.read_csv(pois_path)
             df["geometry"] = df["geometry"].apply(Geometry)
             pois = gpd.GeoDataFrame(df, crs="epsg:{}".format(self._epsg))
@@ -197,14 +201,14 @@ class CalculateAttractivity(Filter):
             return pois
         else:
             # load osm poi data from scratch
-            taglist = read_json_file(tag_list_path)
+            taglist = read_json_file(taglist_path)
             osm = OSM(pbf_path)
             # pois = osm.get_pois(custom_filter=taglist)
             pois = osm.get_data_by_custom_criteria(custom_filter=taglist)
             pois = pois[selected_col]
             pois.to_crs(epsg=self._epsg, inplace=True)
             pois.set_index("id", inplace=True)
-            pois.to_csv(pois_path)
+            pois.to_file(pois_path, driver="GeoJSON")
             return pois
 
     def _process(self, attractivity_info, prefiltered_data):
@@ -215,8 +219,8 @@ class CalculateAttractivity(Filter):
 
         filtered = create_single_element(
             data=prefiltered_data,
-            JSON_outputfile=os.path.join(self._output_dir, "filter_results/"),
-            elementname=self._output_file_name + "_{}".format(poi_desc),
+            JSON_outputfile=os.path.join(self._out_dir, "filter_results/"),
+            elementname=self._out_file_name + "_{}".format(poi_desc),
             whitefilter=whitefilter,
             blackfilter=blackfilter,
         )
@@ -355,7 +359,7 @@ def main():
     input_pbf_file = os.path.join(
         os.getcwd(), "data/osm/pbf_files/liechtenstein-140101.osm.pbf"
     )
-    json_taglist = Path(__file__).parents[0] / "resources" / "poi_filter_tags.json"
+    poi_filter_tags = Path(__file__).parents[0] / "resources" / "poi_filter_tags.json"
     output_dir = os.path.join(os.getcwd(), "data/osm/liechtenstein")
     poi_attractivity_info = os.path.join(
         os.getcwd(),
@@ -364,7 +368,7 @@ def main():
     liechtenstein_poi_path = "/Users/jibi/dev_projects/mobitopp/mobitopp-preprocessing/data/osm/liechtenstein/liechtenstein_poi.json"
 
     poi_processing_pipeline = Pipeline(
-        [PbfFilter(output_dir, "liechtenstein_poi", json_taglist)]
+        [PbfPoiFilter(output_dir, "liechtenstein_poi", poi_filter_tags)]
     )
     # poi_processing_pipeline.run(input_pbf_file)
 
@@ -383,12 +387,17 @@ def main():
     karlsruhe = "/Users/jibi/dev_projects/mobitopp/mobitopp-preprocessing/data/osm/pbf_files/karlsruhe-regbez-210614.osm.pbf"
     out_ka = os.path.join(os.getcwd(), "data/osm/karlsruhe")
 
-    ka_poi_filter = PbfFilter(out_ka, "karlsruhe_poi", json_taglist)
+    ka_poi_filter = PbfPoiFilter(out_ka, "karlsruhe_poi", poi_filter_tags)
     ka_attractivity_filter = CalculateAttractivity(
-        poi_attractivity_info, out_ka, "ka_attractivity", karlsruhe, json_taglist
+        poi_attractivity_info_path=poi_attractivity_info,
+        out_dir=out_ka,
+        out_file_name="ka_attractivity",
+        pbf_path=karlsruhe,
+        poi_filter_tags_path=poi_filter_tags,
+        use_cached_data=True,
     )
 
-    ka_poi_pipeline = [ka_poi_filter, ka_attractivity_filter]
+    ka_poi_pipeline = Pipeline([ka_poi_filter, ka_attractivity_filter])
     ka_poi_pipeline.run(karlsruhe)
 
 
