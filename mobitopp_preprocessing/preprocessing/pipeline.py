@@ -280,6 +280,7 @@ class CalculateAttractivity(Filter):
                 poi_area = joined["area"].loc[id]
                 poi_id = str(id)  # must be string in pois dict
 
+                pois["Node"][poi_id]["area"] = poi_area
                 pois["Node"][poi_id]["attractivity"] = weighting_factor * poi_area
 
             # Ways
@@ -294,6 +295,7 @@ class CalculateAttractivity(Filter):
                 poi_id = str(id)
                 poi_area = gd_ways["area"].loc[id]
 
+                pois["Way"][poi_id]["area"] = poi_area
                 pois["Way"][poi_id]["attractivity"] = weighting_factor * poi_area
 
             # Relations
@@ -307,6 +309,7 @@ class CalculateAttractivity(Filter):
                 poi_id = str(id)
                 poi_area = gd_ways["area"].loc[id]
 
+                pois["Relation"][poi_id]["area"] = poi_area
                 pois["Relation"][poi_id]["attractivity"] = weighting_factor * poi_area
 
             return pois
