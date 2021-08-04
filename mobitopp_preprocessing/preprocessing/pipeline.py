@@ -2,6 +2,7 @@ import os
 import logging
 from pathlib import Path
 
+from icecream import ic
 import pandas as pd
 import geopandas as gpd
 from abc import ABCMeta, abstractmethod
@@ -13,10 +14,22 @@ from pygeos import Geometry
 
 
 from mobitopp_preprocessing.helpers.file_helper import (
+    createDir,
     file_exists,
     read_json_file,
     save_as_json_file,
+    createFile,
 )
+
+
+class NotJsonFileError(Exception):
+    pass
+
+
+class NoStageDefinedError(Exception):
+    """Raised when no stage has been defined for the pipeline."""
+
+    pass
 
 
 class Filter(metaclass=ABCMeta):
@@ -134,6 +147,25 @@ class CalculateAttractivity(Filter):
         self._building_data = self.load_building_data(pbf_path)
         self._poi_data = self.load_poi_data(pbf_path, poi_filter_tags_path)
 
+    def execute(self, poi=None):
+        poi_list = []
+
+        if poi is None:
+            poi = read_json_file(self._poi_path)
+
+        processing_info = pd.read_csv(self._poi_processing_info)
+
+        for row in processing_info.itertuples():
+            result = self._process(attractivity_info=row, prefiltered_data=poi)
+            poi_list.append(result)
+
+        save_as_json_file(
+            self._output_dir,
+            self._output_file_name + "_with_attractivity.json",
+            poi_list,
+        )
+        print("finished")
+
     def load_building_data(self, pbf_path):
         buildings_path = os.path.join(self._output_dir, "buildings.geojson")
         selected_col = ["id", "geometry"]
@@ -174,25 +206,6 @@ class CalculateAttractivity(Filter):
             pois.set_index("id", inplace=True)
             pois.to_csv(pois_path)
             return pois
-
-    def execute(self, poi=None):
-        poi_list = []
-
-        if poi is None:
-            poi = read_json_file(self._poi_path)
-
-        processing_info = pd.read_csv(self._poi_processing_info)
-
-        for row in processing_info.itertuples():
-            result = self._process(attractivity_info=row, prefiltered_data=poi)
-            poi_list.append(result)
-
-        save_as_json_file(
-            self._output_dir,
-            self._output_file_name + "_with_attractivity.json",
-            poi_list,
-        )
-        print("finished")
 
     def _process(self, attractivity_info, prefiltered_data):
         filters = read_json_file(os.path.join(os.getcwd(), attractivity_info.filters))
@@ -313,16 +326,6 @@ class CalculateAttractivity(Filter):
                 pois["Relation"][poi_id]["attractivity"] = weighting_factor * poi_area
 
             return pois
-
-
-class NotJsonFileError(Exception):
-    pass
-
-
-class NoStageDefinedError(Exception):
-    """Raised when no stage has been defined for the pipeline."""
-
-    pass
 
 
 class Pipeline:
