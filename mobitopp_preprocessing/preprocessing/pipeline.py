@@ -354,9 +354,9 @@ def main():
     )
     json_taglist = Path(__file__).parents[0] / "resources" / "poi_filter_tags.json"
     output_dir = os.path.join(os.getcwd(), "data/osm/liechtenstein")
-    poi_processing_info = os.path.join(
+    poi_attractivity_info = os.path.join(
         os.getcwd(),
-        "mobitopp_preprocessing/preprocessing/resources/poi_processing_info.csv",
+        "mobitopp_preprocessing/preprocessing/resources/poi_attractivity_info.csv",
     )
     liechtenstein_poi_path = "/Users/jibi/dev_projects/mobitopp/mobitopp-preprocessing/data/osm/liechtenstein/liechtenstein_poi.json"
 
@@ -365,8 +365,8 @@ def main():
     )
     # poi_processing_pipeline.run(input_pbf_file)
 
-    attractivity_calculator = CalculateAttractivity(
-        poi_processing_info_csv=poi_processing_info,
+    """ attractivity_calculator = CalculateAttractivity(
+        poi_processing_info_csv=poi_attractivity_info,
         output_dir=output_dir,
         output_file_name="liechtenstein_filtered_poi",
         pbf_path=input_pbf_file,
@@ -375,7 +375,18 @@ def main():
         use_cached_data=True,
     )
 
-    attractivity_calculator.execute()
+    attractivity_calculator.execute() """
+
+    karlsruhe = "/Users/jibi/dev_projects/mobitopp/mobitopp-preprocessing/data/osm/pbf_files/karlsruhe-regbez-210614.osm.pbf"
+    out_ka = os.path.join(os.getcwd(), "data/osm/karlsruhe")
+
+    ka_poi_filter = PbfFilter(out_ka, "karlsruhe_poi", json_taglist)
+    ka_attractivity_filter = CalculateAttractivity(
+        poi_attractivity_info, out_ka, "ka_attractivity", karlsruhe, json_taglist
+    )
+
+    ka_poi_pipeline = [ka_poi_filter, ka_attractivity_filter]
+    ka_poi_pipeline.run(karlsruhe)
 
 
 if __name__ == "__main__":
