@@ -257,8 +257,8 @@ class CalculateAttractivity(Filter):
         logger.setLevel(logging.DEBUG)
 
         if calculation_type == "num_pois":
-            pois_count = len(pois["Node"]) + len(pois["Way"]) + len(pois["Relation"])
-            attractivity = pois_count * weighting_factor
+            poi_count = len(pois["Node"]) + len(pois["Way"]) + len(pois["Relation"])
+            attractivity = calculate_attractivity(poi_count, weighting_factor)
 
             # Nodes
             for id_node in pois["Node"].keys():
@@ -298,7 +298,9 @@ class CalculateAttractivity(Filter):
                 poi_id = str(id)  # must be string in pois dict
 
                 pois["Node"][poi_id]["area"] = poi_area
-                pois["Node"][poi_id]["attractivity"] = weighting_factor * poi_area
+                pois["Node"][poi_id]["attractivity"] = calculate_attractivity(
+                    poi_area, weighting_factor
+                )
 
             # Ways
             way_ids = list(map(int, pois["Way"].keys()))
@@ -313,7 +315,9 @@ class CalculateAttractivity(Filter):
                 poi_area = gd_ways["area"].loc[id]
 
                 pois["Way"][poi_id]["area"] = poi_area
-                pois["Way"][poi_id]["attractivity"] = weighting_factor * poi_area
+                pois["Way"][poi_id]["attractivity"] = calculate_attractivity(
+                    poi_area, weighting_factor
+                )
 
             # Relations
             relation_ids = list(map(int, pois["Relation"].keys()))
@@ -327,9 +331,15 @@ class CalculateAttractivity(Filter):
                 poi_area = gd_ways["area"].loc[id]
 
                 pois["Relation"][poi_id]["area"] = poi_area
-                pois["Relation"][poi_id]["attractivity"] = weighting_factor * poi_area
+                pois["Relation"][poi_id]["attractivity"] = calculate_attractivity(
+                    poi_area, weighting_factor
+                )
 
             return pois
+
+
+def calculate_attractivity(attractivity, weighting_factor):
+    return attractivity * weighting_factor
 
 
 class Pipeline:
