@@ -111,7 +111,7 @@ class PbfPoiFilter(Filter):
     ):
 
         [data, elements] = run_filter(
-            elementname=self.out_file_name.join("_poi"),  # TODO: give identifiable name
+            elementname=self._out_file_name.join("_poi"),  # TODO: give identifiable name
             PBF_inputfile=pbf_filepath,
             JSON_outputfile=json_filepath,
             prefilter=prefilter,
@@ -367,9 +367,7 @@ def main():
         "mobitopp_preprocessing/preprocessing/resources/poi_attractivity_info.csv",
     )
 
-    liechtenstein_poi_path = os.path.join(
-        out_dir_liechtenstein, "liechtenstein_poi.json"
-    )
+    liechtenstein_poi_path = os.path.join(out_dir_liechtenstein, "liechtenstein_poi.json")
 
     poi_processing_pipeline = Pipeline(
         [PbfPoiFilter(out_dir_liechtenstein, "liechtenstein_poi", poi_filter_tags)]

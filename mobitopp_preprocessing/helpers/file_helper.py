@@ -47,4 +47,4 @@ def createFile(pathToDir, filename):
 def createDir(pathToDir):
     """Creates directory, if it doesn't exists."""
     print(Path(pathToDir).is_dir())
-    Path(pathToDir).mkdir(exist_ok=True)
+    Path(pathToDir).mkdir(parents=True, exist_ok=True)
