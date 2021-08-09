@@ -10,11 +10,11 @@ def hashesAreEqual(hash1, hash2):
 
 
 def createHash(pathToFile):
-    with open(pathToFile, "rb") as f:
+    """ with open(pathToFile, "rb") as f:
         file_hash = hashlib.md5()
         while chunk := f.read(8192):
             file_hash.update(chunk)
-        return file_hash.hexdigest()
+        return file_hash.hexdigest() """
 
 
 def getHashFromMD5File(dotMd5File):
