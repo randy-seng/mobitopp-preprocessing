@@ -141,8 +141,8 @@ class CalculateAttractivity(Filter):
 
         self._poi_path = poi_path
         self._poi_attractivity_info_path = poi_attractivity_info_path
-        self._out_dir = out_dir
-        self._out_file_name = out_file_name
+        self._out_dir = os.path.join(out_dir, "pois")
+        self._out_file_name = out_file_name + "_with_attractivity"
         self._poi_filter_tags = poi_filter_tags_path
         self._use_cached_data = use_cached_data
         self._epsg = epsg
@@ -165,7 +165,7 @@ class CalculateAttractivity(Filter):
 
         save_as_json_file(
             self._out_dir,
-            self._out_file_name + "_with_attractivity.json",
+            self._out_file_name + ".json",
             poi_list,
         )
         print("finished")
@@ -219,7 +219,7 @@ class CalculateAttractivity(Filter):
 
         filtered = create_single_element(
             data=prefiltered_data,
-            JSON_outputfile=os.path.join(self._out_dir, "filter_results/"),
+            JSON_outputfile=os.path.join(self._out_dir, "filter_results"),
             elementname=self._out_file_name + "_{}".format(poi_desc),
             whitefilter=whitefilter,
             blackfilter=blackfilter,
@@ -366,36 +366,47 @@ class Pipeline:
 
 
 def main():
-    input_pbf_file = os.path.join(
+    lie_out_dir = os.path.join(os.getcwd(), "data/liechtenstein")
+    lie_pbf_path = os.path.join(
         os.getcwd(), "data/osm/pbf_files/liechtenstein-140101.osm.pbf"
     )
     poi_filter_tags = Path(__file__).parents[0] / "resources" / "poi_filter_tags.json"
-    output_dir = os.path.join(os.getcwd(), "data/osm/liechtenstein")
     poi_attractivity_info = os.path.join(
         os.getcwd(),
         "mobitopp_preprocessing/preprocessing/resources/poi_attractivity_info.csv",
     )
-    liechtenstein_poi_path = "/Users/jibi/dev_projects/mobitopp/mobitopp-preprocessing/data/osm/liechtenstein/liechtenstein_poi.json"
+    lie_poi_path = "/Users/jibi/dev_projects/mobitopp/mobitopp-preprocessing/data/liechtenstein/pois/liechtenstein_poi.json"
 
-    poi_processing_pipeline = Pipeline(
-        [PbfPoiFilter(output_dir, "liechtenstein_poi", poi_filter_tags)]
+    # Liechtenstein Pipeline
+    lie_poi_pipeline = Pipeline(
+        [
+            PbfPoiFilter(lie_out_dir, "liechtenstein_poi", poi_filter_tags),
+            CalculateAttractivity(
+                poi_attractivity_info_path=poi_attractivity_info,
+                out_dir=lie_out_dir,
+                out_file_name="liechtenstein",
+                pbf_path=lie_pbf_path,
+                poi_filter_tags_path=poi_filter_tags,
+            ),
+        ]
     )
-    # poi_processing_pipeline.run(input_pbf_file)
+    lie_poi_pipeline.run(lie_pbf_path)
+    """  pois_filter = PbfPoiFilter(lie_out_dir, "liechtenstein_poi", poi_filter_tags)
+    pois = pois_filter.execute(lie_pbf_path)
+    print(type(pois))
 
-    """ attractivity_calculator = CalculateAttractivity(
-        poi_processing_info_csv=poi_attractivity_info,
-        output_dir=output_dir,
-        output_file_name="liechtenstein_filtered_poi",
-        pbf_path=input_pbf_file,
-        poi_filter_tags_path=json_taglist,
-        poi_path=liechtenstein_poi_path,
-        use_cached_data=True,
+    calc_attract = CalculateAttractivity(
+        poi_attractivity_info_path=poi_attractivity_info,
+        out_dir=lie_out_dir,
+        out_file_name="liechtenstein",
+        pbf_path=lie_pbf_path,
+        poi_filter_tags_path=poi_filter_tags,
+        poi_path=lie_poi_path,
     )
+    attract_pois = calc_attract.execute() """
 
-    attractivity_calculator.execute() """
-
-    karlsruhe = "/Users/jibi/dev_projects/mobitopp/mobitopp-preprocessing/data/osm/pbf_files/karlsruhe-regbez-210614.osm.pbf"
-    out_ka = os.path.join(os.getcwd(), "data/osm/karlsruhe")
+    """ karlsruhe = "/Users/jibi/dev_projects/mobitopp/mobitopp-preprocessing/data/osm/pbf_files/karlsruhe-regbez-210614.osm.pbf"
+    out_ka = os.path.join(os.getcwd(), "data/karlsruhe")
 
     ka_poi_filter = PbfPoiFilter(out_ka, "karlsruhe_poi", poi_filter_tags)
     ka_attractivity_filter = CalculateAttractivity(
@@ -408,7 +419,7 @@ def main():
     )
 
     ka_poi_pipeline = Pipeline([ka_poi_filter, ka_attractivity_filter])
-    ka_poi_pipeline.run(karlsruhe)
+    ka_poi_pipeline.run(karlsruhe) """
 
 
 if __name__ == "__main__":
