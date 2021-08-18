@@ -65,7 +65,7 @@ class PbfPoiFilter(Filter):
         createDir(out_dir)
 
         self._prefilter_tags_path = prefilter_tags_path
-        self._out_dir = out_dir
+        self._out_dir = os.path.join(out_dir, "pois")
         self._out_file_name = out_file_name
         self._whitefilter_tags_path = whitefilter_tags_path
         self._blackfilter_tags_path = blackfilter_tags_path
@@ -80,7 +80,7 @@ class PbfPoiFilter(Filter):
             blackfilter=blackfilter,
             whitefilter=whitefilter,
         )
-        return [poi_data, json_filepath]
+        return poi_data
 
     def _create_esm_filters(self):
         prefilter = self._create_prefilter(self._prefilter_tags_path)
@@ -170,7 +170,7 @@ class CalculateAttractivity(Filter):
             self._out_file_name + ".json",
             poi_list,
         )
-        print("finished")
+        return poi_list
 
     def load_building_data(self, pbf_path, use_cache=False):
         buildings_path = os.path.join(self._out_dir, "buildings.geojson")
