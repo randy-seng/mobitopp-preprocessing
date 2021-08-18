@@ -19,7 +19,7 @@ from mobitopp_preprocessing.helpers.file_helper import (
     file_exists,
     read_json_file,
     save_as_json_file,
-    createFile,
+    create_file,
 )
 
 
@@ -61,14 +61,13 @@ class PbfPoiFilter(Filter):
         whitefilter_tags_path=None,
         blackfilter_tags_path=None,
     ):
-        # TODO: setup
-        createDir(out_dir)
-
         self._prefilter_tags_path = prefilter_tags_path
         self._out_dir = os.path.join(out_dir, "pois")
         self._out_file_name = out_file_name
         self._whitefilter_tags_path = whitefilter_tags_path
         self._blackfilter_tags_path = blackfilter_tags_path
+
+        createDir(self._out_dir)
 
     def execute(self, input_pbf_filepath):
         json_filepath = os.path.join(self._out_dir, self._out_file_name + ".json")
@@ -134,29 +133,22 @@ class CalculateAttractivity(Filter):
         out_file_name,
         pbf_path,
         poi_filter_tags_path,
-        poi_path=None,
-        use_cached_data=False,
         epsg=3035,
     ):
-        createDir(out_dir)
-
-        self._poi_path = poi_path
         self._poi_attractivity_info_path = poi_attractivity_info_path
         self._out_dir = os.path.join(out_dir, "pois")
         self._out_file_name = out_file_name + "_with_attractivity"
         self._poi_filter_tags = poi_filter_tags_path
-        self._use_cached_data = use_cached_data
         self._epsg = epsg
-        self._building_data = self.load_building_data(pbf_path, use_cached_data)
-        self._poi_data = self.load_poi_data(
-            pbf_path, poi_filter_tags_path, use_cached_data
-        )
+        self._building_data = self.load_building_data(pbf_path)
+        self._poi_data = self.load_poi_data(pbf_path, poi_filter_tags_path)
 
-    def execute(self, poi=None):
+        createDir(out_dir)
+
+    def execute(self, poi):
         poi_list = []
 
-        if poi is None:
-            poi = read_json_file(self._poi_path)
+        attractivity_info = pd.read_csv(self._poi_attractivity_info_path)
 
         for row in tqdm(
             attractivity_info.itertuples(),
@@ -172,46 +164,28 @@ class CalculateAttractivity(Filter):
         )
         return poi_list
 
-    def load_building_data(self, pbf_path, use_cache=False):
-        buildings_path = os.path.join(self._out_dir, "buildings.geojson")
+    def load_building_data(self, pbf_path):
         selected_col = ["id", "geometry"]
 
-        if use_cache and file_exists(buildings_path):
-            buildings = gpd.read_file(buildings_path)
-            buildings.set_crs(epsg=self._epsg, inplace=True)
-            buildings.set_index("id", inplace=True)
-            return buildings
-        else:
-            # load osm building data from scratch
-            osm = OSM(pbf_path)
-            buildings = osm.get_buildings()
-            buildings = buildings[selected_col]
-            buildings.to_crs(epsg=self._epsg, inplace=True)
-            buildings.set_index("id", inplace=True)
-            buildings.to_file(buildings_path, driver="GeoJSON")
-            return buildings
+        # load osm building data from scratch
+        osm = OSM(pbf_path)
+        buildings = osm.get_buildings()
+        buildings = buildings[selected_col]
+        buildings.to_crs(epsg=self._epsg, inplace=True)
+        buildings.set_index("id", inplace=True)
+        return buildings
 
-    def load_poi_data(self, pbf_path, taglist_path, use_cache=False):
-        pois_path = os.path.join(self._out_dir, "pois.geojson")
+    def load_poi_data(self, pbf_path, taglist_path):
         selected_col = ["id", "geometry"]
 
-        if use_cache and file_exists(pois_path):
-            df = pd.read_csv(pois_path)
-            df["geometry"] = df["geometry"].apply(Geometry)
-            pois = gpd.GeoDataFrame(df, crs="epsg:{}".format(self._epsg))
-            pois.set_index("id", inplace=True)
-            return pois
-        else:
-            # load osm poi data from scratch
-            taglist = read_json_file(taglist_path)
-            osm = OSM(pbf_path)
-            # pois = osm.get_pois(custom_filter=taglist)
-            pois = osm.get_data_by_custom_criteria(custom_filter=taglist)
-            pois = pois[selected_col]
-            pois.to_crs(epsg=self._epsg, inplace=True)
-            pois.set_index("id", inplace=True)
-            pois.to_file(pois_path, driver="GeoJSON")
-            return pois
+        # load osm poi data from scratch
+        taglist = read_json_file(taglist_path)
+        osm = OSM(pbf_path)
+        pois = osm.get_data_by_custom_criteria(custom_filter=taglist)
+        pois = pois[selected_col]
+        pois.to_crs(epsg=self._epsg, inplace=True)
+        pois.set_index("id", inplace=True)
+        return pois
 
     def _process(self, attractivity_info, prefiltered_data):
         filters = read_json_file(os.path.join(os.getcwd(), attractivity_info.filters))
@@ -308,9 +282,6 @@ class CalculateAttractivity(Filter):
             way_ids = list(map(int, pois["Way"].keys()))
             gd_ways = self._poi_data.loc[way_ids]
             gd_ways["area"] = gd_ways.geometry.area
-            ic(gd_ways.head(30))
-            ic(gd_ways.index)
-            ic(type(gd_ways.index))
 
             for id in gd_ways.index:
                 poi_id = str(id)
@@ -325,8 +296,6 @@ class CalculateAttractivity(Filter):
             relation_ids = list(map(int, pois["Relation"].keys()))
             gd_relations = self._poi_data.loc[relation_ids]
             gd_relations["area"] = gd_relations.geometry.area
-            ic(gd_relations.head(30))
-            ic(gd_relations.index)
 
             for id in gd_relations.index:
                 poi_id = str(id)
