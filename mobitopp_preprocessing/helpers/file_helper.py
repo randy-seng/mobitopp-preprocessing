@@ -2,6 +2,7 @@ import os
 import json
 
 from pathlib import Path
+from posixpath import dirname
 
 
 def readTextFile(pathToTextFile):
@@ -36,6 +37,7 @@ def file_exists(pathToFile):
 
 
 def createFile(pathToDir, filename):
+    # TODO: Remove this method and replace all usages of this method with create_file
     """Creates file if it doesn't exist."""
     file = os.path.join(pathToDir, filename)
     createDir(pathToDir)
@@ -44,6 +46,17 @@ def createFile(pathToDir, filename):
         open(file, "w").close()
 
 
+def create_file(file_path):
+    """Creates file if it doesn't exist."""
+    dir_name = os.path.dirname(file_path)
+    createDir(dir_name)
+
+    if not os.path.exists(file_path):
+        Path(file_path).touch(exist_ok=True)
+        """ with open(file_path, "w") as file:
+            file.close() """
+
+
 def createDir(pathToDir):
     """Creates directory, if it doesn't exists."""
-    Path(pathToDir).mkdir(exist_ok=True)
+    Path(pathToDir).mkdir(parents=True, exist_ok=True)
