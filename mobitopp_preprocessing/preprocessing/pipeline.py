@@ -3,6 +3,7 @@ import logging
 from pathlib import Path
 
 from icecream import ic
+from tqdm import tqdm
 import pandas as pd
 import geopandas as gpd
 from abc import ABCMeta, abstractmethod
@@ -157,9 +158,10 @@ class CalculateAttractivity(Filter):
         if poi is None:
             poi = read_json_file(self._poi_path)
 
-        attractivity_info = pd.read_csv(self._poi_attractivity_info)
-
-        for row in attractivity_info.itertuples():
+        for row in tqdm(
+            attractivity_info.itertuples(),
+            "Calculate attractivities for POIs",
+        ):
             result = self._process(attractivity_info=row, prefiltered_data=poi)
             poi_list.append(result)
 
