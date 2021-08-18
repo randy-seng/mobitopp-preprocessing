@@ -58,8 +58,8 @@ class PbfPoiFilter(Filter):
         out_dir,
         out_file_name,
         prefilter_tags_path,
-        whitefilter_tags_path=None,  # TODO: Change to None
-        blackfilter_tags_path=None,  # TODO: Change to None
+        whitefilter_tags_path=None,
+        blackfilter_tags_path=None,
     ):
         # TODO: setup
         createDir(out_dir)
