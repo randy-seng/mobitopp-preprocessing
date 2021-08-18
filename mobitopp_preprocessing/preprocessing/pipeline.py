@@ -110,8 +110,8 @@ class PbfPoiFilter(Filter):
         self, pbf_filepath, json_filepath, prefilter, blackfilter, whitefilter
     ):
 
-        [data, elements] = run_filter(
-            elementname=self.out_file_name.join("_poi"),  # TODO: give identifiable name
+        [data, _] = run_filter(
+            elementname=self._out_file_name.join("_poi"),
             PBF_inputfile=pbf_filepath,
             JSON_outputfile=json_filepath,
             prefilter=prefilter,
@@ -122,7 +122,7 @@ class PbfPoiFilter(Filter):
             LoadElements=False,
             verbose=True,
         )
-        return data, elements
+        return data
 
 
 class CalculateAttractivity(Filter):
