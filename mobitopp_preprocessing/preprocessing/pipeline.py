@@ -1,8 +1,8 @@
 import os
 import logging
 from pathlib import Path
+from typing import Union
 
-from icecream import ic
 from tqdm import tqdm
 import pandas as pd
 import geopandas as gpd
@@ -11,16 +11,18 @@ from esy.osmfilter import run_filter
 from esy.osmfilter.osm_filter import create_single_element
 from esy.osmfilter import Node, Way, Relation
 from pyrosm import OSM
-from pygeos import Geometry
+import shapely
+import srtm
 
 
 from mobitopp_preprocessing.helpers.file_helper import (
     createDir,
-    file_exists,
     read_json_file,
     save_as_json_file,
-    create_file,
+    save_gdf_to_geojson,
 )
+
+from mobitopp_preprocessing.preprocessing.config import URBAN_ROAD_NETWORK_DEFAULT
 
 
 class NotJsonFileError(Exception):
@@ -34,8 +36,28 @@ class NoStageDefinedError(Exception):
 
 
 class Filter(metaclass=ABCMeta):
-    @abstractmethod
+    def __init__(self, write_result=False, out_dir=None) -> None:
+        self._write_result = write_result
+        self._out_dir = out_dir
+
+        if out_dir is not None:
+            createDir(out_dir)
+
     def execute(self, task):
+        result = self._filter(task)
+        self._save_template(result)
+        return result
+
+    @abstractmethod
+    def _filter(self, task):
+        pass
+
+    def _save_template(self, data):
+        if self._write_result:
+            self._save(data)
+
+    @abstractmethod
+    def _save(self, data) -> None:
         pass
 
 
@@ -60,16 +82,15 @@ class PbfPoiFilter(Filter):
         prefilter_tags_path,
         whitefilter_tags_path=None,
         blackfilter_tags_path=None,
+        write_result=False,
     ):
+        super().__init__(write_result=write_result, out_dir=out_dir)
         self._prefilter_tags_path = prefilter_tags_path
-        self._out_dir = os.path.join(out_dir, "pois")
         self._out_file_name = out_file_name
         self._whitefilter_tags_path = whitefilter_tags_path
         self._blackfilter_tags_path = blackfilter_tags_path
 
-        createDir(self._out_dir)
-
-    def execute(self, input_pbf_filepath):
+    def _filter(self, input_pbf_filepath):
         json_filepath = os.path.join(self._out_dir, self._out_file_name + ".json")
         prefilter, blackfilter, whitefilter = self._create_esm_filters()
         poi_data = self._filter_data(
@@ -124,6 +145,9 @@ class PbfPoiFilter(Filter):
         )
         return data
 
+    def _save(self, data):
+        save_as_json_file(self._out_dir, self._out_file_name, data)
+
 
 class CalculateAttractivity(Filter):
     def __init__(
@@ -134,18 +158,17 @@ class CalculateAttractivity(Filter):
         pbf_path,
         poi_filter_tags_path,
         epsg=3035,
+        write_result=False,
     ):
+        super().__init__(write_result=write_result, out_dir=out_dir)
         self._poi_attractivity_info_path = poi_attractivity_info_path
-        self._out_dir = os.path.join(out_dir, "pois")
         self._out_file_name = out_file_name + "_with_attractivity"
         self._poi_filter_tags = poi_filter_tags_path
         self._epsg = epsg
         self._building_data = self.load_building_data(pbf_path)
         self._poi_data = self.load_poi_data(pbf_path, poi_filter_tags_path)
 
-        createDir(out_dir)
-
-    def execute(self, poi):
+    def _filter(self, poi):
         poi_list = []
 
         attractivity_info = pd.read_csv(self._poi_attractivity_info_path)
@@ -157,11 +180,6 @@ class CalculateAttractivity(Filter):
             result = self._process(attractivity_info=row, prefiltered_data=poi)
             poi_list.append(result)
 
-        save_as_json_file(
-            self._out_dir,
-            self._out_file_name + ".json",
-            poi_list,
-        )
         return poi_list
 
     def load_building_data(self, pbf_path):
@@ -308,9 +326,198 @@ class CalculateAttractivity(Filter):
 
             return pois
 
+    def _save(self, data):
+        save_as_json_file(
+            self._out_dir,
+            self._out_file_name + ".json",
+            data,
+        )
+
 
 def calculate_attractivity(attractivity, weighting_factor):
     return attractivity * weighting_factor
+
+
+class PbfRoadNetworkFilter(Filter):
+    def __init__(self, out_dir, out_file_name, write_result=False) -> None:
+        super().__init__(write_result=write_result, out_dir=out_dir)
+        self._out_file_name = out_file_name
+
+    def _filter(self, input_pbf_filepath) -> gpd.GeoDataFrame:
+        osm = OSM(input_pbf_filepath)
+        road_network = osm.get_network("all")
+
+        return road_network
+
+    def _save(self, data):
+        save_gdf_to_geojson(data, self._out_dir, self._out_file_name)
+
+
+class AddAltitudeToRoadNetwork(Filter):
+    def __init__(self, out_dir, out_file_name, write_result=False) -> None:
+        super().__init__(write_result=write_result, out_dir=out_dir)
+        self._elevation_data = self._load_elevation_data()
+        self._out_file_name = out_file_name
+
+    def _filter(self, road_network: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+        road_network["geometry"] = road_network["geometry"].apply(
+            func=self._add_elevation_to_geom
+        )
+        return road_network
+
+    def _load_elevation_data(self):
+        cache_location = os.path.join(os.getcwd(), "data/cache/srtm")
+        createDir(cache_location)
+        elevation_data = srtm.get_data(local_cache_dir=cache_location)
+        return elevation_data
+
+    def _add_elevation(self, lat, lon):
+        height = self._elevation_data.get_elevation(lat, lon)
+        return (lat, lon, height)
+
+    def _add_elevation_to_geom(self, geometry):
+        transformed = shapely.ops.transform(self._add_elevation, geometry)
+        return transformed
+
+    def _save(self, data):
+        save_gdf_to_geojson(data, self._out_dir, self._out_file_name)
+
+
+class AddDefaultRoadNetAttributes(Filter):
+    def __init__(
+        self, out_dir, out_file_name, road_net_defaults_path, write_result=False
+    ) -> None:
+        super().__init__(write_result=write_result, out_dir=out_dir)
+        self._out_file_name = out_file_name
+        self._road_net_defaults_path = road_net_defaults_path
+
+    def _filter(
+        self, road_network: Union[gpd.GeoDataFrame, pd.DataFrame]
+    ) -> gpd.GeoDataFrame:
+        """
+        Derives and adds to an existing road network new column features with default
+        values relevant to a Visum network.
+
+        The default values and the new derived features are taken from configuration
+        file which Visum uses to import an OSM network to translate it to a Visum
+        network as explained in:
+        https://cgi.ptvgroup.com/vision-help/VISUM_2021_DEU/Content/2_Schnittstellen/2_13_Aufbau_der_Konfigurationspakete.htm
+
+        Args:
+            road_network (GeoDataFrame or DataFrame): The road network data.
+
+        Returns:
+            A road network with Visum network related column features.
+        """
+
+        # network_defaults contains column features with default values relevant
+        # to a visum network
+        network_defaults = read_json_file(self._road_net_defaults_path)
+        road_net_default_added = self._add_default_col_features(
+            road_network, network_defaults
+        )
+        return road_net_default_added
+
+    def _add_default_col_features(
+        self,
+        road_network: Union[gpd.GeoDataFrame, pd.DataFrame],
+        net_defaults: dict,
+    ) -> gpd.GeoDataFrame:
+        """
+        Derives and adds new column features with default values relevant to a
+        Visum network to the existing road network.
+
+
+
+        Args:
+            road_network (DataFrame or GeoDataFrame): The road network data.
+            net_defaults (dict): The default values to be added to the road network.
+
+        Returns:
+            A road network with new column features relevant to a Visum network.
+
+        """
+        # Fill road network with new attributes with default values
+        road_net_default_added = road_network.assign(**net_defaults["DEFAULT"])
+
+        key_val_unparsed_tag_tuples = [
+            self._create_kv_unparsed_tag_tuple(unparsed_tag)
+            for unparsed_tag in net_defaults.keys()
+            if unparsed_tag != "DEFAULT"
+        ]
+
+        for tag, val, urban_net_defaults_key in key_val_unparsed_tag_tuples:
+            if tag.lower() in road_net_default_added:
+                # road_net.loc[road_net[key] == val, **]
+                self._add_custom_default_col_features(
+                    net_defaults,
+                    road_net_default_added,
+                    tag,
+                    val,
+                    urban_net_defaults_key,
+                )
+
+            else:
+                # if tag doesn't exist as column in road_net_default_added,
+                # then look in tag column if tag exists
+                regex = '.("{}":"{}")'.format(tag, val)
+                tag_exists_index = road_net_default_added["tags"].str.contains(
+                    regex, regex=True
+                )
+                if tag_exists_index.any():
+                    self._add_custom_default_col_features(
+                        net_defaults,
+                        road_net_default_added,
+                        tag_exists_index,
+                        val,
+                        urban_net_defaults_key,
+                    )
+
+        return road_net_default_added
+
+    def _add_custom_default_col_features(
+        self, urban_net_defaults, road_net_default_added, tag, val, urban_net_defaults_key
+    ):
+        custom_default = urban_net_defaults[urban_net_defaults_key]
+
+        for custom_default_attr, custom_default_attr_val in custom_default.items():
+            road_net_default_added.loc[
+                road_net_default_added[tag] == val, custom_default_attr
+            ] = custom_default_attr_val
+
+    def _create_kv_unparsed_tag_tuple(self, osm_kv_tag: str) -> tuple[str, str, str]:
+        """
+        Creates a three tuple from an unparsed OSM key-value tag.
+
+        Args:
+            osm_kv_tag (str): The OSM key-value tag in the form of "tag"="value".
+
+        Returns:
+            A three tuple consisting of (tag, value, unparsed osm key-value tag)
+        """
+        tag, val = self._parse_osm_kv_tag(osm_kv_tag)
+        return (tag, val, osm_kv_tag)
+
+    def _parse_osm_kv_tag(self, osm_tag):
+        """
+        Parse a string representing an OSM key value tag and return the key values as list.
+
+        Args:
+            condition (str): The OSM (key, value) tag where key is the tag.clear
+
+        Returns:
+            A list of form [tag, value].
+
+        """
+        ticks_removed = osm_tag.replace("'", "")
+        double_quotes_removed = ticks_removed.replace('"', "")
+
+        tag, value = double_quotes_removed.split("=")
+
+        return [tag, value]
+
+    def _save(self, data) -> None:
+        save_gdf_to_geojson(data, self._out_dir, self._out_file_name)
 
 
 class Pipeline:
@@ -337,7 +544,8 @@ class Pipeline:
 
 
 def main():
-    lie_out_dir = os.path.join(os.getcwd(), "data/liechtenstein")
+    lie_out_poi_dir = os.path.join(os.getcwd(), "data/liechtenstein/poi")
+    lie_roadnet_out_dir = os.path.join(os.getcwd(), "data/liechtenstein/road_network")
     lie_pbf_path = os.path.join(
         os.getcwd(), "data/osm/pbf_files/liechtenstein-140101.osm.pbf"
     )
@@ -351,17 +559,35 @@ def main():
     # Liechtenstein Pipeline
     lie_poi_pipeline = Pipeline(
         [
-            PbfPoiFilter(lie_out_dir, "liechtenstein_poi", poi_filter_tags),
+            PbfPoiFilter(lie_out_poi_dir, "liechtenstein_poi", poi_filter_tags),
             CalculateAttractivity(
                 poi_attractivity_info_path=poi_attractivity_info,
-                out_dir=lie_out_dir,
+                out_dir=lie_out_poi_dir,
                 out_file_name="liechtenstein",
                 pbf_path=lie_pbf_path,
                 poi_filter_tags_path=poi_filter_tags,
             ),
         ]
     )
-    lie_poi_pipeline.run(lie_pbf_path)
+    # lie_poi_pipeline.run(lie_pbf_path)
+
+    lie_road_pipeline = Pipeline(
+        [
+            PbfRoadNetworkFilter(lie_roadnet_out_dir, "lie_road_network"),
+            AddAltitudeToRoadNetwork(
+                lie_roadnet_out_dir, "lie_road_net_with_elevation", write_result=True
+            ),
+            AddDefaultRoadNetAttributes(
+                lie_roadnet_out_dir,
+                "lie_road_net_with_defaults",
+                URBAN_ROAD_NETWORK_DEFAULT,
+            ),
+        ]
+    )
+
+    gdf = lie_road_pipeline.run(lie_pbf_path)
+    print(gdf.head(30))
+
     """  pois_filter = PbfPoiFilter(lie_out_dir, "liechtenstein_poi", poi_filter_tags)
     pois = pois_filter.execute(lie_pbf_path)
     print(type(pois))
