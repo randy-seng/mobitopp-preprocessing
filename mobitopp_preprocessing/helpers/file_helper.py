@@ -2,7 +2,6 @@ import os
 import json
 
 from pathlib import Path
-from posixpath import dirname
 
 
 def readTextFile(pathToTextFile):
@@ -60,3 +59,9 @@ def create_file(file_path):
 def createDir(pathToDir):
     """Creates directory, if it doesn't exists."""
     Path(pathToDir).mkdir(parents=True, exist_ok=True)
+
+
+def save_gdf_to_geojson(gdf, out_dir, out_file_name):
+    """Save GeoDataFrame to out_dir/out_file_name.geojson"""
+    path = os.path.join(out_dir, out_file_name + ".geojson")
+    gdf.to_file(path, driver="GeoJSON")
