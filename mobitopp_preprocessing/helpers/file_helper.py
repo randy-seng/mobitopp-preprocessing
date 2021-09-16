@@ -65,3 +65,9 @@ def save_gdf_to_geojson(gdf, out_dir, out_file_name):
     """Save GeoDataFrame to out_dir/out_file_name.geojson"""
     path = os.path.join(out_dir, out_file_name + ".geojson")
     gdf.to_file(path, driver="GeoJSON")
+
+
+def save_gdf_to_csv(gdf, out_dir, out_file_name):
+    """Save GeoDataFrame to out_dir/out_file_name.csv"""
+    path = os.path.join(out_dir, out_file_name + ".csv")
+    gdf.to_csv(path)
