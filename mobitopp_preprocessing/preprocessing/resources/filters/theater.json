@@ -1,0 +1,8 @@
+{
+    "whitefilter": {
+        "amenity": [
+            "social_centre",
+            "theatre"
+        ]
+    }
+}

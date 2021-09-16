@@ -1,0 +1,10 @@
+{
+    "whitefilter": {
+        "amenity": [
+            "pharmacy"
+        ],
+        "building": [
+            "pharmacy"
+        ]
+    }
+}

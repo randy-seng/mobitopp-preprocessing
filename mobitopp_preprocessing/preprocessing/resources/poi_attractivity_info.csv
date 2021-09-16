@@ -1,0 +1,6 @@
+name,activity_type,weighting_factor,calculation_type,filters
+pharmacy,SERVICE,0.89,num_pois,mobitopp_preprocessing/preprocessing/resources/filters/pharmacy.json
+cinema,LEISURE,0.45,area,mobitopp_preprocessing/preprocessing/resources/filters/cinema.json
+theater,LEISURE,0.2,num_pois,mobitopp_preprocessing/preprocessing/resources/filters/theater.json
+e_ladestation,SERVICE,0.5,num_pois,mobitopp_preprocessing/preprocessing/resources/filters/e_ladestation.json
+einkauf_langfristig_sonstiges,SERVICE,0.45,area,mobitopp_preprocessing/preprocessing/resources/filters/einkauf_langfristig_sonstiges.json

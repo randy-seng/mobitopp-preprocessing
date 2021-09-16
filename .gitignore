@@ -144,3 +144,7 @@ Thumbs.db
 
 # mobitopp preprocessing
 data/
+examples/
+prototypes/
+mobitopp_preprocessing/preprocessing/resources/road_network/Urban road network/
+

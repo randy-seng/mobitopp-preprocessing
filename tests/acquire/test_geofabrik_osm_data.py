@@ -1,10 +1,13 @@
-import pytest
 import shutil
 import os
+
+import pytest
 from pathlib import Path
+
 from mobitopp_preprocessing.acquire import geofabrik_osm_data as od
 
-@pytest.fixture(scope="module")
+
+@pytest.fixture()
 def path():
     path = Path(__file__).parents[1] / "resources" / "poi-data"
     os.makedirs(name=path, exist_ok=True)
@@ -14,7 +17,7 @@ def path():
 
 def test_downloadFromLink(path):
     url = "https://download.geofabrik.de/antarctica-latest.osm.pbf"
-    fileName = url.split('/')[-1]
+    fileName = url.split("/")[-1]
     location = os.path.join(path, fileName)
     assert "peter" == str(location)
     print(str(location))
