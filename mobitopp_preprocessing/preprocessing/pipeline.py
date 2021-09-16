@@ -2,6 +2,7 @@ import os
 import logging
 from pathlib import Path
 from typing import Union
+from esy.osm.pbf import file
 
 from tqdm import tqdm
 import pandas as pd
@@ -20,6 +21,7 @@ from mobitopp_preprocessing.helpers.file_helper import (
     read_json_file,
     save_as_json_file,
     save_gdf_to_geojson,
+    save_gdf_to_csv,
 )
 
 from mobitopp_preprocessing.preprocessing.config import URBAN_ROAD_NETWORK_DEFAULT
@@ -59,6 +61,22 @@ class Filter(metaclass=ABCMeta):
     @abstractmethod
     def _save(self, data) -> None:
         pass
+
+
+class PbfPoiFilter2(Filter):
+    def __init__(self, out_dir, poi_filter_tags_path, write_result=False) -> None:
+        super().__init__(write_result=write_result, out_dir=out_dir)
+        self._poi_filter_tags_path = poi_filter_tags_path
+
+    def _filter(self, in_pbf_path):
+        osm = OSM(in_pbf_path)
+        poi_filter_tags = self._create_prefilter(self._poi_filter_tags_path)
+        poi_data = osm.get_data_by_custom_criteria(poi_filter_tags)
+        return poi_data
+
+    def _create_prefilter(self, poi_filter_tags_path):
+        prefilter_tags = read_json_file(poi_filter_tags_path)
+        return {Node: prefilter_tags, Way: prefilter_tags, Relation: prefilter_tags}
 
 
 class PbfPoiFilter(Filter):
@@ -339,13 +357,16 @@ def calculate_attractivity(attractivity, weighting_factor):
 
 
 class PbfRoadNetworkFilter(Filter):
-    def __init__(self, out_dir, out_file_name, write_result=False) -> None:
+    def __init__(
+        self, out_dir, out_file_name, make_tag_to_col=["maxspeed"], write_result=False
+    ) -> None:
         super().__init__(write_result=write_result, out_dir=out_dir)
         self._out_file_name = out_file_name
+        self._make_tag_to_col = make_tag_to_col
 
     def _filter(self, input_pbf_filepath) -> gpd.GeoDataFrame:
         osm = OSM(input_pbf_filepath)
-        road_network = osm.get_network("all")
+        road_network = osm.get_network("all", extra_attributes=self._make_tag_to_col)
 
         return road_network
 
@@ -520,6 +541,61 @@ class AddDefaultRoadNetAttributes(Filter):
         save_gdf_to_geojson(data, self._out_dir, self._out_file_name)
 
 
+class ValidateRoadNetwork(Filter):
+    def __init__(
+        self,
+        out_dir,
+        out_file_name="ValidateRoadNetwork",
+        write_result=False,
+    ) -> None:
+        super().__init__(write_result=write_result, out_dir=out_dir)
+        self._out_file_name = out_file_name
+
+    def _filter(self, road_network):
+        has_neg_maxspeed = self._has_neg_maxspeed(road_network)
+        has_neg_O2V_MAXSPEED = self._has_neg_o2v_maxspeed(road_network)
+
+        self.print_error(has_neg_maxspeed, "Negative values for maxspeed found!")
+        self.print_error(has_neg_O2V_MAXSPEED, "Negative O2V_MAXSPEED found!")
+        return road_network
+
+    def print_error(self, has_neg_maxspeed, error_msg):
+        if has_neg_maxspeed:
+            print(
+                "\nWARNING! {}".format(error_msg)
+                + "Please check the folder: <{}> to see in records with errors!\n".format(
+                    self._out_dir
+                )
+            )
+
+    def _has_neg_maxspeed(self, road_network, col_name="maxspeed"):
+        road_net_without_na = road_network[road_network[col_name].notnull()]
+        # print(road_network["maxspeed"].dropna().astype(int).head(15))
+        records_with_neg_maxspeed = road_net_without_na[
+            road_net_without_na[col_name].astype(int) < 0
+        ]
+        if len(records_with_neg_maxspeed.index) > 0:
+            self._save_errors(
+                out_dir=self._out_dir,
+                file_name="records_with_negative_{}".format(col_name),
+                records_w_errors=records_with_neg_maxspeed,
+                col=["id", col_name],
+            )
+            return True
+        else:
+            return False
+
+    def _has_neg_o2v_maxspeed(self, road_network):
+        return self._has_neg_maxspeed(road_network, "O2V_MAXSPEED")
+
+    def _save_errors(self, out_dir, file_name, records_w_errors, col=[]):
+        errors = records_w_errors[col]
+        save_gdf_to_csv(errors, out_dir, file_name)
+
+    def _save(self, data) -> None:
+        save_gdf_to_geojson(data, self._out_dir, self._out_file_name)
+
+
 class Pipeline:
     def __init__(self, stages=[]):
         self._stages = stages
@@ -574,19 +650,21 @@ def main():
     lie_road_pipeline = Pipeline(
         [
             PbfRoadNetworkFilter(lie_roadnet_out_dir, "lie_road_network"),
-            AddAltitudeToRoadNetwork(
-                lie_roadnet_out_dir, "lie_road_net_with_elevation", write_result=True
-            ),
+            AddAltitudeToRoadNetwork(lie_roadnet_out_dir, "lie_road_net_with_elevation"),
             AddDefaultRoadNetAttributes(
                 lie_roadnet_out_dir,
                 "lie_road_net_with_defaults",
                 URBAN_ROAD_NETWORK_DEFAULT,
             ),
+            ValidateRoadNetwork(
+                out_dir=lie_roadnet_out_dir,
+                write_result=True,
+            ),
         ]
     )
 
-    gdf = lie_road_pipeline.run(lie_pbf_path)
-    print(gdf.head(30))
+    lie_road_pipeline.run(lie_pbf_path)
+    # print(gdf.head(30))
 
     """  pois_filter = PbfPoiFilter(lie_out_dir, "liechtenstein_poi", poi_filter_tags)
     pois = pois_filter.execute(lie_pbf_path)
