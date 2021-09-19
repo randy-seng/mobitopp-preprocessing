@@ -95,6 +95,84 @@ class FileDataSource(DataSource):
         return [self._data_source]
 
 
+class GeoDataFrameStream(DataSource):
+    """
+    This class creates a stream of GeoDataFrames by reading from a GeoJSON
+    file and feeding it as an input to the pipeline.
+    """
+
+    def __init__(self, geojson_path: str, chunk_size: int = 100) -> None:
+        """
+        Creates an instance of GeoDataFrameStream.
+
+        Args:
+            geojson_path (str): The path to the geojson file.
+            chunk_size (int): The chunk size which the stream returns per iteration.
+
+        """
+        super().__init__(geojson_path)
+        self._chunk_size = chunk_size
+
+    def read(self):
+        """Yields GeodataFrames as generator by reading from geojson_path."""
+        for gdf in self._geojson_generator(self._data_source, self._chunk_size):
+            yield gdf
+
+    def _geojson_generator(self, geojson_path: str, chunk_size):
+        """
+        Yields GeoDataFrames of size=chunk_size by reading from geojson
+        file.
+        """
+        if chunk_size == 0:
+            yield gpd.read_file(geojson_path)
+        else:
+            geojson_type = self._get_type(geojson_path)
+            geojson_crs = self._get_crs(geojson_path)
+
+            for feature_chunk in self._geo_feature_gen(geojson_path, chunk_size):
+                geojson_chunk = {
+                    "type": geojson_type,
+                    "crs": geojson_crs,
+                    "features": feature_chunk,
+                }
+                yield gpd.GeoDataFrame.from_features(geojson_chunk)
+
+    def _geo_feature_gen(self, geojson_path, chunk_size):
+        """
+        Extract 'features' of geojson file and yield json objects of size chunk_size.
+        """
+        with open(geojson_path, "rb") as in_file:
+            feature_generator = ijson.items(in_file, "features.item")
+            for chunk in chunked(feature_generator, chunk_size):
+                yield chunk
+
+    def _get_type(self, geojson_path):
+        """
+        Returns the value of key 'type' in the geojson file.
+        Otherwise return None.
+        """
+        with open(geojson_path, "rb") as in_file:
+            geojson_type = None
+            geojson_type_gen = ijson.items(in_file, "type")
+            for geo_type in geojson_type_gen:
+                geojson_type = geo_type
+            in_file.close()
+            return geojson_type
+
+    def _get_crs(self, geojson_path):
+        """
+        Returns the crs information if it exists in the geojson file.
+        Otherwise return None.
+        """
+        with open(geojson_path, "rb") as in_file:
+            geojson_crs = None
+            geojson_crs_gen = ijson.items(in_file, "crs")
+            for geo_crs in geojson_crs_gen:
+                geojson_crs = geo_crs
+            in_file.close()
+            return geojson_crs
+
+
 class WriteGdfToFile(DataSink):
     def __init__(self, out_dir, file_name) -> None:
         self._out_dir = out_dir
@@ -102,6 +180,17 @@ class WriteGdfToFile(DataSink):
 
     def _consume(self, data) -> None:
         save_gdf_to_geojson(data, self._out_dir, self._file_name)
+
+
+class WriteGdfStreamToFile(DataSink):
+    def __init__(self, output_file_path) -> None:
+        self._output_file_path = output_file_path
+        createFile(output_file_path)
+
+    def _consume(self, data):
+        with open(self._data_sink, "w") as out_file:
+            for gdf in data:
+                as_geojson = gdf.to_json()
 
 
 class PbfPoiFilter(Filter):
@@ -745,6 +834,33 @@ def main():
 
     ka_poi_pipeline = Pipeline([ka_poi_filter, ka_attractivity_filter])
     ka_poi_pipeline.run(karlsruhe) """
+
+
+def road_net_pipeline():
+    lie_pbf_path = os.path.join(
+        os.getcwd(), "data/osm/pbf_files/liechtenstein-140101.osm.pbf"
+    )
+
+    geojson_path = "/Users/jibi/dev_projects/mobitopp/mobitopp-preprocessing/data/liechtenstein/road_network2/lie_road_network.geojson"
+    lie_roadnet_out_dir = os.path.join(os.getcwd(), "data/liechtenstein/road_network2")
+
+    lie_road_pipeline = Pipeline(
+        [
+            AddAltitudeToRoadNetwork(lie_roadnet_out_dir, "lie_road_net_with_elevation"),
+            AddDefaultRoadNetAttributes(
+                lie_roadnet_out_dir,
+                "lie_road_net_with_defaults",
+                URBAN_ROAD_NETWORK_DEFAULT,
+            ),
+            ValidateRoadNetwork(
+                out_dir=lie_roadnet_out_dir,
+                write_result=True,
+            ),
+        ],
+        WriteGdfToFile(lie_roadnet_out_dir, "final_result"),
+    )
+
+    lie_road_pipeline.run(GeoDataFrameStream(geojson_path, chunk_size=500))
 
 
 if __name__ == "__main__":
