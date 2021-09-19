@@ -97,11 +97,22 @@ class FileDataSource(DataSource):
 
 class WriteGdfToFile(DataSink):
     def __init__(self, out_dir, file_name) -> None:
+        super().__init__()
         self._out_dir = out_dir
         self._file_name = file_name
 
     def _consume(self, data) -> None:
         save_gdf_to_geojson(data, self._out_dir, self._file_name)
+
+
+class WriteJsonToFile(DataSink):
+    def __init__(self, out_dir, file_name) -> None:
+        super().__init__()
+        self._out_dir = out_dir
+        self._file_name = file_name
+
+    def _consume(self, data):
+        save_as_json_file(self._out_dir, self._file_name, data)
 
 
 class PbfPoiFilter(Filter):
@@ -123,15 +134,11 @@ class PbfPoiFilter(Filter):
         out_dir,
         out_file_name,
         prefilter_tags_path,
-        whitefilter_tags_path=None,
-        blackfilter_tags_path=None,
         write_result=False,
     ):
         super().__init__(write_result=write_result, out_dir=out_dir)
         self._prefilter_tags_path = prefilter_tags_path
         self._out_file_name = out_file_name
-        self._whitefilter_tags_path = whitefilter_tags_path
-        self._blackfilter_tags_path = blackfilter_tags_path
 
     def filter(self, input_pbf_filepath):
         json_filepath = os.path.join(self._out_dir, self._out_file_name + ".json")
@@ -147,28 +154,14 @@ class PbfPoiFilter(Filter):
 
     def _create_esm_filters(self):
         prefilter = self._create_prefilter(self._prefilter_tags_path)
-        whitefilter = self._create_whitefilter(self._whitefilter_tags_path)
-        blackfilter = self._create_blackfilter(self._blackfilter_tags_path)
+        whitefilter = [[()]]
+        blackfilter = [()]
 
         return prefilter, blackfilter, whitefilter
 
     def _create_prefilter(self, prefilter_tags_path):
         prefilter_tags = read_json_file(prefilter_tags_path)
         return {Node: prefilter_tags, Way: prefilter_tags, Relation: prefilter_tags}
-
-    def _create_whitefilter(self, whitefilter_tags_path):
-        if whitefilter_tags_path is None:
-            return [[()]]
-        else:
-            whitefilter_tags = read_json_file(self._whitefilter_tags_path)
-            # TODO: Transform whitefilter tags to adhere to esy-osmfilter whitefilter
-
-    def _create_blackfilter(self, blackfilter_tags_path):
-        if blackfilter_tags_path is None:
-            return [()]
-        else:
-            blackfilter_tags = read_json_file(self._blackfilter_tags_path)
-            # TODO: Transform blackfilter tags to adhere to esy-osmfilter blackfilter
 
     def _filter_data(
         self, pbf_filepath, json_filepath, prefilter, blackfilter, whitefilter
@@ -572,7 +565,8 @@ class AddDefaultRoadNetAttributes(Filter):
 
     def _parse_osm_kv_tag(self, osm_tag):
         """
-        Parse a string representing an OSM key value tag and return the key values as list.
+        Parse a string representing an OSM key value tag and return the key values as
+        list.
 
         Args:
             condition (str): The OSM (key, value) tag where key is the tag.clear
@@ -671,6 +665,7 @@ class Pipeline:
 
 def main():
     lie_out_poi_dir = os.path.join(os.getcwd(), "data/liechtenstein/poi")
+    print(type(lie_out_poi_dir))
     lie_roadnet_out_dir = os.path.join(os.getcwd(), "data/liechtenstein/road_network")
     lie_pbf_path = os.path.join(
         os.getcwd(), "data/osm/pbf_files/liechtenstein-140101.osm.pbf"
@@ -683,7 +678,7 @@ def main():
     lie_poi_path = "/Users/jibi/dev_projects/mobitopp/mobitopp-preprocessing/data/liechtenstein/pois/liechtenstein_poi.json"
 
     # Liechtenstein Pipeline
-    """ lie_poi_pipeline = Pipeline(
+    lie_poi_pipeline = Pipeline(
         [
             PbfPoiFilter(lie_out_poi_dir, "liechtenstein_poi", poi_filter_tags),
             CalculateAttractivity(
@@ -693,9 +688,10 @@ def main():
                 pbf_path=lie_pbf_path,
                 poi_filter_tags_path=poi_filter_tags,
             ),
-        ]
-    ) """
-    # lie_poi_pipeline.run(lie_pbf_path)
+        ],
+        WriteJsonToFile(lie_out_poi_dir, "poi_final_result"),
+    )
+    lie_poi_pipeline.run(FileDataSource(lie_pbf_path))
 
     lie_road_filters = [
         PbfRoadNetworkFilter(lie_roadnet_out_dir, "lie_road_network"),
