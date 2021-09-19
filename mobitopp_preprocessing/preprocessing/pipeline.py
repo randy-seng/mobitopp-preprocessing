@@ -2,7 +2,7 @@ import os
 import logging
 from pathlib import Path
 from typing import Union
-from esy.osm.pbf import file
+import geojson
 
 from tqdm import tqdm
 import pandas as pd
@@ -14,10 +14,14 @@ from esy.osmfilter import Node, Way, Relation
 from pyrosm import OSM
 import shapely
 import srtm
+import ijson
+from more_itertools import chunked
+from geojson import dumps
 
 
 from mobitopp_preprocessing.helpers.file_helper import (
     createDir,
+    createFile,
     read_json_file,
     save_as_json_file,
     save_gdf_to_geojson,
@@ -45,16 +49,17 @@ class Filter(metaclass=ABCMeta):
         if out_dir is not None:
             createDir(out_dir)
 
-    def execute(self, task):
-        result = self._filter(task)
-        self._save_template(result)
-        return result
+    def __call__(self, data):
+        for datum in data:
+            result = self.filter(datum)
+            self.save(result)
+            yield result
 
     @abstractmethod
-    def _filter(self, task):
+    def filter(self, data):
         pass
 
-    def _save_template(self, data):
+    def save(self, data):
         if self._write_result:
             self._save(data)
 
@@ -63,20 +68,40 @@ class Filter(metaclass=ABCMeta):
         pass
 
 
-class PbfPoiFilter2(Filter):
-    def __init__(self, out_dir, poi_filter_tags_path, write_result=False) -> None:
-        super().__init__(write_result=write_result, out_dir=out_dir)
-        self._poi_filter_tags_path = poi_filter_tags_path
+class DataSource(metaclass=ABCMeta):
+    def __init__(self, data_source) -> None:
+        super().__init__()
+        self._data_source = data_source
 
-    def _filter(self, in_pbf_path):
-        osm = OSM(in_pbf_path)
-        poi_filter_tags = self._create_prefilter(self._poi_filter_tags_path)
-        poi_data = osm.get_data_by_custom_criteria(poi_filter_tags)
-        return poi_data
+    @abstractmethod
+    def read(self):
+        pass
 
-    def _create_prefilter(self, poi_filter_tags_path):
-        prefilter_tags = read_json_file(poi_filter_tags_path)
-        return {Node: prefilter_tags, Way: prefilter_tags, Relation: prefilter_tags}
+
+class DataSink(metaclass=ABCMeta):
+    def __call__(self, data) -> None:
+        self._consume(data)
+
+    @abstractmethod
+    def _consume(self, data):
+        pass
+
+
+class FileDataSource(DataSource):
+    def __init__(self, data_source: str) -> None:
+        super().__init__(data_source)
+
+    def read(self):
+        return [self._data_source]
+
+
+class WriteGdfToFile(DataSink):
+    def __init__(self, out_dir, file_name) -> None:
+        self._out_dir = out_dir
+        self._file_name = file_name
+
+    def _consume(self, data) -> None:
+        save_gdf_to_geojson(data, self._out_dir, self._file_name)
 
 
 class PbfPoiFilter(Filter):
@@ -108,7 +133,7 @@ class PbfPoiFilter(Filter):
         self._whitefilter_tags_path = whitefilter_tags_path
         self._blackfilter_tags_path = blackfilter_tags_path
 
-    def _filter(self, input_pbf_filepath):
+    def filter(self, input_pbf_filepath):
         json_filepath = os.path.join(self._out_dir, self._out_file_name + ".json")
         prefilter, blackfilter, whitefilter = self._create_esm_filters()
         poi_data = self._filter_data(
@@ -167,6 +192,32 @@ class PbfPoiFilter(Filter):
         save_as_json_file(self._out_dir, self._out_file_name, data)
 
 
+class PbfPoiFilter2(Filter):
+    def __init__(
+        self,
+        out_dir,
+        poi_filter_tags_path,
+        out_file_name="PbfPoiFilter2",
+        write_result=False,
+    ) -> None:
+        super().__init__(write_result=write_result, out_dir=out_dir)
+        self._poi_filter_tags_path = poi_filter_tags_path
+        self._out_file_name = out_file_name
+
+    def filter(self, in_pbf_path):
+        osm = OSM(in_pbf_path)
+        poi_filter_tags = self._create_prefilter(self._poi_filter_tags_path)
+        poi_data = osm.get_data_by_custom_criteria(poi_filter_tags)
+        return poi_data
+
+    def _create_prefilter(self, poi_filter_tags_path):
+        prefilter_tags = read_json_file(poi_filter_tags_path)
+        return {Node: prefilter_tags, Way: prefilter_tags, Relation: prefilter_tags}
+
+    def _save(self, data) -> None:
+        save_gdf_to_geojson(data, self._out_dir, self.out_file_name)
+
+
 class CalculateAttractivity(Filter):
     def __init__(
         self,
@@ -186,7 +237,7 @@ class CalculateAttractivity(Filter):
         self._building_data = self.load_building_data(pbf_path)
         self._poi_data = self.load_poi_data(pbf_path, poi_filter_tags_path)
 
-    def _filter(self, poi):
+    def filter(self, poi):
         poi_list = []
 
         attractivity_info = pd.read_csv(self._poi_attractivity_info_path)
@@ -364,7 +415,7 @@ class PbfRoadNetworkFilter(Filter):
         self._out_file_name = out_file_name
         self._make_tag_to_col = make_tag_to_col
 
-    def _filter(self, input_pbf_filepath) -> gpd.GeoDataFrame:
+    def filter(self, input_pbf_filepath) -> gpd.GeoDataFrame:
         osm = OSM(input_pbf_filepath)
         road_network = osm.get_network("all", extra_attributes=self._make_tag_to_col)
 
@@ -380,7 +431,7 @@ class AddAltitudeToRoadNetwork(Filter):
         self._elevation_data = self._load_elevation_data()
         self._out_file_name = out_file_name
 
-    def _filter(self, road_network: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    def filter(self, road_network: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         road_network["geometry"] = road_network["geometry"].apply(
             func=self._add_elevation_to_geom
         )
@@ -412,7 +463,7 @@ class AddDefaultRoadNetAttributes(Filter):
         self._out_file_name = out_file_name
         self._road_net_defaults_path = road_net_defaults_path
 
-    def _filter(
+    def filter(
         self, road_network: Union[gpd.GeoDataFrame, pd.DataFrame]
     ) -> gpd.GeoDataFrame:
         """
@@ -551,7 +602,7 @@ class ValidateRoadNetwork(Filter):
         super().__init__(write_result=write_result, out_dir=out_dir)
         self._out_file_name = out_file_name
 
-    def _filter(self, road_network):
+    def filter(self, road_network):
         has_neg_maxspeed = self._has_neg_maxspeed(road_network)
         has_neg_O2V_MAXSPEED = self._has_neg_o2v_maxspeed(road_network)
 
@@ -597,26 +648,25 @@ class ValidateRoadNetwork(Filter):
 
 
 class Pipeline:
-    def __init__(self, stages=[]):
-        self._stages = stages
+    def __init__(self, filters, data_sink: DataSink):
+        self._filters = filters
+        self._data_sink = data_sink
 
-    def add(self, stage):
-        self.stages.append(stage)
-
-    def run(self, task):
-        if len(self._stages) == 0:
+    def run(self, data_source: DataSource):
+        if len(self._filters) == 0:
             raise NoStageDefinedError("No stage has been defined on this pipeline!")
 
-        return self._execute(task=task, filters=self._stages)
+        pipeline = self._create_pipeline(data_source=data_source, filters=self._filters)
 
-    def _execute(self, task, filters):
-        filter, *tail = filters
-        result = filter.execute(task)
+        for result in pipeline:
+            self._data_sink(result)
 
-        if len(tail) != 0:
-            return self._execute(result, tail)
-        else:
-            return result
+    def _create_pipeline(self, data_source: DataSource, filters):
+        generator = data_source.read()
+
+        for filter in filters:
+            generator = filter(generator)
+        return generator
 
 
 def main():
@@ -633,7 +683,7 @@ def main():
     lie_poi_path = "/Users/jibi/dev_projects/mobitopp/mobitopp-preprocessing/data/liechtenstein/pois/liechtenstein_poi.json"
 
     # Liechtenstein Pipeline
-    lie_poi_pipeline = Pipeline(
+    """ lie_poi_pipeline = Pipeline(
         [
             PbfPoiFilter(lie_out_poi_dir, "liechtenstein_poi", poi_filter_tags),
             CalculateAttractivity(
@@ -644,28 +694,28 @@ def main():
                 poi_filter_tags_path=poi_filter_tags,
             ),
         ]
-    )
+    ) """
     # lie_poi_pipeline.run(lie_pbf_path)
 
+    lie_road_filters = [
+        PbfRoadNetworkFilter(lie_roadnet_out_dir, "lie_road_network"),
+        AddAltitudeToRoadNetwork(lie_roadnet_out_dir, "lie_road_net_with_elevation"),
+        AddDefaultRoadNetAttributes(
+            lie_roadnet_out_dir,
+            "lie_road_net_with_defaults",
+            URBAN_ROAD_NETWORK_DEFAULT,
+        ),
+        ValidateRoadNetwork(
+            out_dir=lie_roadnet_out_dir,
+            write_result=True,
+        ),
+    ]
+
     lie_road_pipeline = Pipeline(
-        [
-            PbfRoadNetworkFilter(lie_roadnet_out_dir, "lie_road_network"),
-            AddAltitudeToRoadNetwork(lie_roadnet_out_dir, "lie_road_net_with_elevation"),
-            AddDefaultRoadNetAttributes(
-                lie_roadnet_out_dir,
-                "lie_road_net_with_defaults",
-                URBAN_ROAD_NETWORK_DEFAULT,
-            ),
-            ValidateRoadNetwork(
-                out_dir=lie_roadnet_out_dir,
-                write_result=True,
-            ),
-        ]
+        lie_road_filters, WriteGdfToFile(lie_roadnet_out_dir, "final_result")
     )
 
-    lie_road_pipeline.run(lie_pbf_path)
-    # print(gdf.head(30))
-
+    lie_road_pipeline.run(FileDataSource(lie_pbf_path))
     """  pois_filter = PbfPoiFilter(lie_out_dir, "liechtenstein_poi", poi_filter_tags)
     pois = pois_filter.execute(lie_pbf_path)
     print(type(pois))
@@ -699,3 +749,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # road_net_pipeline()
