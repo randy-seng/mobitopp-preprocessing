@@ -1,6 +1,0 @@
-http://download.geofabrik.de/europe/germany/baden-wuerttemberg/karlsruhe-regbez-210614.osm.pbf
-http://download.geofabrik.de/europe/germany/baden-wuerttemberg/freiburg-regbez-210614.osm.pbf
-http://download.geofabrik.de/europe/germany/baden-wuerttemberg/tuebingen-regbez-210615.osm.pbf
-http://download.geofabrik.de/south-america/suriname-latest.osm.pbf
-https://download.geofabrik.de/antarctica-latest.osm.pbf
-http://download.geofabrik.de/europe/liechtenstein-140101.osm.pbf
