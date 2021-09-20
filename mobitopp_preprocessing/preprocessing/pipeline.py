@@ -69,10 +69,6 @@ class Filter(metaclass=ABCMeta):
 
 
 class DataSource(metaclass=ABCMeta):
-    def __init__(self, data_source) -> None:
-        super().__init__()
-        self._data_source = data_source
-
     @abstractmethod
     def read(self):
         pass
@@ -88,11 +84,11 @@ class DataSink(metaclass=ABCMeta):
 
 
 class FileDataSource(DataSource):
-    def __init__(self, data_source: str) -> None:
-        super().__init__(data_source)
+    def __init__(self, file_path: str) -> None:
+        self._file_path = file_path
 
     def read(self):
-        return [self._data_source]
+        return [self._file_path]
 
 
 class WriteGdfToFile(DataSink):
@@ -102,7 +98,8 @@ class WriteGdfToFile(DataSink):
         self._file_name = file_name
 
     def _consume(self, data) -> None:
-        save_gdf_to_geojson(data, self._out_dir, self._file_name)
+        for datum in data:
+            save_gdf_to_geojson(datum, self._out_dir, self._file_name)
 
 
 class WriteJsonToFile(DataSink):
@@ -112,7 +109,8 @@ class WriteJsonToFile(DataSink):
         self._file_name = file_name
 
     def _consume(self, data):
-        save_as_json_file(self._out_dir, self._file_name, data)
+        for datum in data:
+            save_as_json_file(self._out_dir, self._file_name, datum)
 
 
 class PbfPoiFilter(Filter):
@@ -652,8 +650,7 @@ class Pipeline:
 
         pipeline = self._create_pipeline(data_source=data_source, filters=self._filters)
 
-        for result in pipeline:
-            self._data_sink(result)
+        self._data_sink(pipeline)
 
     def _create_pipeline(self, data_source: DataSource, filters):
         generator = data_source.read()
@@ -745,4 +742,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    # road_net_pipeline()
+# road_net_pipeline()
