@@ -2,7 +2,6 @@ import os
 import logging
 from pathlib import Path
 from typing import Union
-import geojson
 
 from tqdm import tqdm
 import pandas as pd
@@ -16,12 +15,12 @@ import shapely
 import srtm
 import ijson
 from more_itertools import chunked
-from geojson import dumps
 
 
 from mobitopp_preprocessing.helpers.file_helper import (
     createDir,
     createFile,
+    file_exists,
     read_json_file,
     save_as_json_file,
     save_gdf_to_geojson,
@@ -42,7 +41,40 @@ class NoStageDefinedError(Exception):
 
 
 class Filter(metaclass=ABCMeta):
-    def __init__(self, write_result=False, out_dir=None) -> None:
+    """
+    An abstract class as in the Pipes and Filters architectural pattern.
+    Concrete classes implementing this class receive input data and filter,
+    transform, enrich or enhance said data.
+
+    The concrete classes implementing this abstract class can be found in this
+    Python module.
+
+    Furthermore, this class should be used in conjunction with the Pipeline
+    class.
+
+    When subclassing this class, it is needed to implement the following two
+    abstract methods:
+        - the filter method
+        - _save method
+
+    Args:
+        write_result (bool): A flag used whether to write the processed data to disk.
+        out_dir (str): Specifies the output directory where the data should be saved
+        to.
+
+    ### Example:
+    Assume having a class called ExampleFilter subclassing the abstract Filter
+    class::
+        data = [1, 2, 3, 4]
+
+        filter1 = ExampleFilter(write_result=True, out_dir="path/to/out")
+
+        # calls the filter method on data and saves the processed data to disk
+        filter1(data)
+
+    """
+
+    def __init__(self, write_result: bool = False, out_dir: str = None) -> None:
         self._write_result = write_result
         self._out_dir = out_dir
 
@@ -50,6 +82,32 @@ class Filter(metaclass=ABCMeta):
             createDir(out_dir)
 
     def __call__(self, data):
+        """
+        Applies the filter method to the data and returns the result.
+
+        NOTE: Implementing the __call__ method allows instances of this class
+        to behave like functions.
+
+        Acts as a template method and calls the abstract method filter.
+
+        ### Example::
+
+            # Class ExampleFilter inherits __call__ method from super class Filter
+            # This makes object instances of this class able to be treated as function
+
+            class CalculateSum(Filter):
+                def filter(data):
+                    return sum(data)
+
+
+            sum_filter = CalculateSum()
+            data = [1, 2, 3, 4]
+
+            #  executes the __call__ method when using object instance as method
+            sum_filter(data)
+
+
+        """
         for datum in data:
             result = self.filter(datum)
             self.save(result)
@@ -57,41 +115,136 @@ class Filter(metaclass=ABCMeta):
 
     @abstractmethod
     def filter(self, data):
+        """
+        Depending on the implementation, this abstract method enhances, filters,
+        or transforms the data and returns data.
+
+        Args:
+            data: The data to undergo manipulation
+
+        Returns:
+            the data after manipulation(enhancement, filtering, or transformation)
+
+        """
         pass
 
     def save(self, data):
+        """
+        Saves the data after applying the filter method at out_dir if
+        write_result is True.
+
+        Acts as a template method and calls the abstract method _save.
+
+        """
         if self._write_result:
             self._save(data)
 
     @abstractmethod
     def _save(self, data) -> None:
+        """
+        An abstract method where concrete implementations should
+        save the data to disk.
+
+        """
         pass
 
 
 class DataSource(metaclass=ABCMeta):
+    """
+    An abstract class as in the Pipes and Filters architectural pattern.
+
+    This class acts as a data source and delivers input upon request to
+    the data processing pipeline.
+
+    The concrete classes implementing this abstract class can be found in this
+    Python module.
+
+    Furthermore, this class is used by the Pipeline class.
+
+    Subclasses extending this class need to implement the abstract method read().
+
+    Args:
+            data_source: the data source to be read from.
+
+    """
+
     def __init__(self, data_source) -> None:
         super().__init__()
         self._data_source = data_source
 
     @abstractmethod
     def read(self):
+        """
+        Reads data from the data source and returns it.
+
+        An abstract method to be implemented by the concrete classes.
+        """
         pass
 
 
 class DataSink(metaclass=ABCMeta):
+    """
+    An abstract class as in the Pipes and Filters architectural pattern.
+
+    This class acts as a data sink and consumes the data that it receives.
+    Depending on the implementation consuming data could be writing it to
+    a file and saving it or outputting the data to the console.
+
+    The concrete classes implementing this abstract class can be found in this
+    Python module.
+
+    Furthermore, this class is used by the Pipeline class.
+
+    Subclasses extending this class need to implement the abstract method consume().
+
+    """
+
     def __call__(self, data) -> None:
+        """
+        Consumes the data.
+
+        This method enables an instance of this class to be treated as a
+        method.
+
+        Example::
+
+            data = [1, 2, 3, 4]
+            data_sink = ExampleDataSink() # concrete implementation of DataSink
+
+            data_sink(data) # consumes data
+        """
         self._consume(data)
 
     @abstractmethod
     def _consume(self, data):
+        """
+        Consumes the data.
+
+        It is an abstract class.
+
+        """
         pass
 
 
 class FileDataSource(DataSource):
+    """
+    Acts as a wrapper for a file path.
+
+    Args:
+        data_source (str): The file path
+
+    """
+
     def __init__(self, data_source: str) -> None:
+        if not file_exists(data_source):
+            raise FileNotFoundError(filename=str)
+
         super().__init__(data_source)
 
-    def read(self):
+    def read(self) -> str:
+        """
+        Returns the file path.
+        """
         return [self._data_source]
 
 
@@ -99,23 +252,22 @@ class GeoDataFrameStream(DataSource):
     """
     This class creates a stream of GeoDataFrames by reading from a GeoJSON
     file and feeding it as an input to the pipeline.
+
+
+    Args:
+        geojson_path (str): The path to the geojson file.
+        chunk_size (int): The chunk size which the stream returns per iteration.
+
     """
 
     def __init__(self, geojson_path: str, chunk_size: int = 100) -> None:
-        """
-        Creates an instance of GeoDataFrameStream.
-
-        Args:
-            geojson_path (str): The path to the geojson file.
-            chunk_size (int): The chunk size which the stream returns per iteration.
-
-        """
         super().__init__(geojson_path)
         self._chunk_size = chunk_size
 
     def read(self):
         """Yields GeodataFrames as generator by reading from geojson_path."""
         for gdf in self._geojson_generator(self._data_source, self._chunk_size):
+            print(gdf.head())
             yield gdf
 
     def _geojson_generator(self, geojson_path: str, chunk_size):
@@ -174,44 +326,68 @@ class GeoDataFrameStream(DataSource):
 
 
 class WriteGdfToFile(DataSink):
+    """
+    Writes a geopandas GeoDataFrame to a file.
+
+    Args:
+        out_dir (str): the directory where the file is to be saved.
+        file_name (str): the file name.
+    """
+
     def __init__(self, out_dir, file_name) -> None:
         self._out_dir = out_dir
         self._file_name = file_name
 
     def _consume(self, data) -> None:
+        """
+        Saves a GeoDataFrame as file to the directory specified in the class attribute
+        _out_dir and _file_name.
+
+        Args:
+            data (GeoDataFrame): the GeoDataFrame to be saved.
+        """
         save_gdf_to_geojson(data, self._out_dir, self._file_name)
 
 
 class WriteGdfStreamToFile(DataSink):
+    """
+    Consumes a stream of GeoDataFrames an writes it to one file.
+
+    Args:
+        output_file_path (str): The file path where the GeoDataFrame should be saved.
+    """
+
     def __init__(self, output_file_path) -> None:
         self._output_file_path = output_file_path
         createFile(output_file_path)
 
     def _consume(self, data):
+        """
+        Receives a stream of GeoDataFrames and writes it to a geojson file.
+        """
         with open(self._data_sink, "w") as out_file:
             for gdf in data:
                 as_geojson = gdf.to_json()
 
 
 class PbfPoiFilter(Filter):
-    """Reads from a osm pbf file and filters out POIs using a tag list.
+    """
+    Reads from a OpenStreetMap pbf file and filters out POI data.
 
-    This class should be used in conjunction with the createStage function,
-    returning a pipeline stage which can then be used to add it to the
-    existing class Pipeline.
+    A JSON file containing a list of OSM key value tags is used to filter out
 
-    Arguments:
-    input_pbf_filepath,
-    input_poi_tags_filepath,
-    output_json_filepath,
-    final_output_filepath
+    Args:
+        input_pbf_filepath,
+        input_poi_tags_filepath,
+        output_json_filepath,
+        final_output_filepath
     """
 
     def __init__(
         self,
         out_dir,
-        out_file_name,
         prefilter_tags_path,
+        out_file_name: str = "PbfPoiFilter",
         whitefilter_tags_path=None,
         blackfilter_tags_path=None,
         write_result=False,
@@ -284,10 +460,10 @@ class PbfPoiFilter(Filter):
 class PbfPoiFilter2(Filter):
     def __init__(
         self,
-        out_dir,
-        poi_filter_tags_path,
-        out_file_name="PbfPoiFilter2",
-        write_result=False,
+        out_dir: str,
+        poi_filter_tags_path: str,
+        out_file_name: str = "PbfPoiFilter2",
+        write_result: bool = False,
     ) -> None:
         super().__init__(write_result=write_result, out_dir=out_dir)
         self._poi_filter_tags_path = poi_filter_tags_path
@@ -310,13 +486,13 @@ class PbfPoiFilter2(Filter):
 class CalculateAttractivity(Filter):
     def __init__(
         self,
-        poi_attractivity_info_path,
-        out_dir,
-        out_file_name,
-        pbf_path,
-        poi_filter_tags_path,
-        epsg=3035,
-        write_result=False,
+        poi_attractivity_info_path: str,
+        out_dir: str,
+        pbf_path: str,
+        poi_filter_tags_path: str,
+        out_file_name: str = "CalculateAttractivity",
+        epsg: int = 3035,
+        write_result: bool = False,
     ):
         super().__init__(write_result=write_result, out_dir=out_dir)
         self._poi_attractivity_info_path = poi_attractivity_info_path
@@ -498,7 +674,11 @@ def calculate_attractivity(attractivity, weighting_factor):
 
 class PbfRoadNetworkFilter(Filter):
     def __init__(
-        self, out_dir, out_file_name, make_tag_to_col=["maxspeed"], write_result=False
+        self,
+        out_dir,
+        out_file_name="PbfRoadNetworkFilter",
+        make_tag_to_col=["maxspeed"],
+        write_result=False,
     ) -> None:
         super().__init__(write_result=write_result, out_dir=out_dir)
         self._out_file_name = out_file_name
@@ -511,6 +691,28 @@ class PbfRoadNetworkFilter(Filter):
         return road_network
 
     def _save(self, data):
+        save_gdf_to_geojson(data, self._out_dir, self._out_file_name)
+
+
+class ConvertDataFrameColumnToString(Filter):
+    def __init__(
+        self,
+        col_names: list,
+        out_file_name: str = "ConvertDataFrameColumnToString",
+        write_result: bool = False,
+        out_dir: Union[str, None] = None,
+    ) -> None:
+        super().__init__(write_result=write_result, out_dir=out_dir)
+        self._col_names = col_names
+        self._out_file_name = out_file_name
+
+    def _filter(self, data):
+        for col_name in self._col_names:
+            data[col_name] = data[col_name].astype(str)
+            print(data["col_name"])
+        return data
+
+    def _save(self, data) -> None:
         save_gdf_to_geojson(data, self._out_dir, self._out_file_name)
 
 
@@ -787,7 +989,7 @@ def main():
     # lie_poi_pipeline.run(lie_pbf_path)
 
     lie_road_filters = [
-        PbfRoadNetworkFilter(lie_roadnet_out_dir, "lie_road_network"),
+        PbfRoadNetworkFilter(lie_roadnet_out_dir, "lie_road_network", write_result=True),
         AddAltitudeToRoadNetwork(lie_roadnet_out_dir, "lie_road_net_with_elevation"),
         AddDefaultRoadNetAttributes(
             lie_roadnet_out_dir,
@@ -846,6 +1048,9 @@ def road_net_pipeline():
 
     lie_road_pipeline = Pipeline(
         [
+            ConvertDataFrameColumnToString(
+                ["length"], write_result=True, out_dir=lie_roadnet_out_dir
+            ),
             AddAltitudeToRoadNetwork(lie_roadnet_out_dir, "lie_road_net_with_elevation"),
             AddDefaultRoadNetAttributes(
                 lie_roadnet_out_dir,
@@ -864,5 +1069,5 @@ def road_net_pipeline():
 
 
 if __name__ == "__main__":
-    main()
-    # road_net_pipeline()
+    # main()
+    road_net_pipeline()
